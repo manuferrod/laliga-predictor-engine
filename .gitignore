@@ -1,0 +1,10 @@
+# Datos e intermedios locales (no subir)
+data/
+!data/.gitkeep
+outputs/
+!outputs/.gitkeep
+*.parquet
+*.pkl
+*.joblib
+*.out.ipynb
+.ipynb_checkpoints/
