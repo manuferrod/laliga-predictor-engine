@@ -8,3 +8,4 @@ outputs/
 *.joblib
 *.out.ipynb
 .ipynb_checkpoints/
+!data/02_processed/transfermarkt_€€_2005_2025.parquet
