@@ -1,0 +1,31 @@
+# Core data & parquet
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.11.4
+pyarrow==16.1.0
+
+# ML
+scikit-learn==1.4.2
+imbalanced-learn==0.12.2
+
+# Visualización
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# Web / scraping
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.2.2
+fake-useragent==1.5.1
+python-dateutil==2.9.0.post0
+pytz==2024.1
+tqdm==4.66.4
+soccerdata>=1.5,<2.0
+
+# Ejecutar notebooks "sin cabeza" (para el runner de CI)
+jupyter==1.0.0
+ipykernel==6.29.5
+papermill==2.4.0
+
+# Utilidades
+joblib==1.4.2
