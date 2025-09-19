@@ -1,0 +1,26 @@
+name: finalize-round
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "manual/b365_filled_*.csv"
+      - "notebooks/**"
+      - "scripts/run_stage2.py"
+      - "scripts/verify_outputs.py"
+      - "requirements.txt"
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - run: python scripts/run_stage2.py
+      - run: python scripts/verify_outputs.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: outputs/
