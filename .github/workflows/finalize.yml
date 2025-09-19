@@ -8,21 +8,58 @@ on:
       - "scripts/run_stage2.py"
       - "scripts/verify_outputs.py"
       - "requirements.txt"
+
 jobs:
   finalize:
     runs-on: ubuntu-latest
     env:
-      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}   # <<<<<<<<<< añade esto
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: |
+
+      - name: Install deps
+        run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - run: python scripts/run_stage2.py
-      - run: python scripts/verify_outputs.py
-      - uses: actions/upload-artifact@v4
+
+      - name: Run Stage 2
+        run: python scripts/run_stage2.py
+
+      - name: Verify outputs
+        run: python scripts/verify_outputs.py
+
+      - name: Upload outputs artifact
+        uses: actions/upload-artifact@v4
         with:
           name: outputs
           path: outputs/
+
+      # === Copia automática al repo B ===
+      - name: Push outputs to repo B
+        if: ${{ secrets.REPO_B_PAT && vars.REPO_B_URL }}
+        env:
+          REPO_B_PAT: ${{ secrets.REPO_B_PAT }}
+          REPO_B_URL: ${{ vars.REPO_B_URL }}
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p /tmp/repoB
+          cd /tmp/repoB
+          git clone "https://${REPO_B_PAT}@${REPO_B_URL#https://}" .
+
+          mkdir -p data/outputs
+          rm -rf data/outputs/*
+          cp -r "$GITHUB_WORKSPACE/outputs/." data/outputs/
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No hay cambios en outputs/ para repo B."
+          else
+            git commit -m "CI: update outputs from engine (${GITHUB_SHA::7})"
+            git push origin HEAD:main
+          fi
