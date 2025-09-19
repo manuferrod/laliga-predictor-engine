@@ -39,11 +39,16 @@ jobs:
 
       # === Copia automática al repo B ===
       - name: Push outputs to repo B
-        if: ${{ secrets.REPO_B_PAT && vars.REPO_B_URL }}
         env:
           REPO_B_PAT: ${{ secrets.REPO_B_PAT }}
           REPO_B_URL: ${{ vars.REPO_B_URL }}
         run: |
+          # Si faltan credenciales, saltamos elegantemente
+          if [ -z "${REPO_B_PAT}" ] || [ -z "${REPO_B_URL}" ]; then
+            echo "Skipping push to repo B: missing REPO_B_PAT or REPO_B_URL."
+            exit 0
+          fi
+      
           set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -52,7 +57,7 @@ jobs:
           cd /tmp/repoB
           git clone "https://${REPO_B_PAT}@${REPO_B_URL#https://}" .
       
-          # copiamos a la carpeta 'outputs' en la RAÍZ del repo B
+          # Copiamos a 'outputs/' en la raíz del repo B
           mkdir -p outputs
           rm -rf outputs/*
           cp -r "$GITHUB_WORKSPACE/outputs/." outputs/
