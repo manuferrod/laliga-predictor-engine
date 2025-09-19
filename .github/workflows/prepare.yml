@@ -1,10 +1,17 @@
 name: prepare-round
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      run_date:
+        description: "RUN_DATE (2025-09-19) para la plantilla"
+        required: false
+        default: ""
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
     env:
-      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}   # <<<<<<<<<< añade esto
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -12,10 +19,15 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - run: python scripts/run_stage1.py
+      - name: Run Stage 1 (make_template)
+        run: |
+          if [ -n "${{ inputs.run_date }}" ]; then
+            python scripts/run_stage1.py --run-date "${{ inputs.run_date }}"
+          else
+            python scripts/run_stage1.py
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: b365-template
           path: manual/b365_template_*.csv
           if-no-files-found: error
-
