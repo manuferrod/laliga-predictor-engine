@@ -3,6 +3,8 @@ on: workflow_dispatch
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    env:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}   # <<<<<<<<<< añade esto
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,3 +18,4 @@ jobs:
           name: b365-template
           path: manual/b365_template_*.csv
           if-no-files-found: error
+
