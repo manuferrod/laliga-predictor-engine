@@ -47,15 +47,16 @@ jobs:
           set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+      
           mkdir -p /tmp/repoB
           cd /tmp/repoB
           git clone "https://${REPO_B_PAT}@${REPO_B_URL#https://}" .
-
-          mkdir -p data/outputs
-          rm -rf data/outputs/*
-          cp -r "$GITHUB_WORKSPACE/outputs/." data/outputs/
-
+      
+          # copiamos a la carpeta 'outputs' en la RAÍZ del repo B
+          mkdir -p outputs
+          rm -rf outputs/*
+          cp -r "$GITHUB_WORKSPACE/outputs/." outputs/
+      
           git add -A
           if git diff --cached --quiet; then
             echo "No hay cambios en outputs/ para repo B."
