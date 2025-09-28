@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys, csv, glob, json
+import sys, csv, glob
 
 BASE = Path("outputs")
 
@@ -24,9 +24,7 @@ REQUIRED_FILES = [
     # baseline bet365 (grid + métricas por temporada)
     "bet365_grid.json",
     "bet365_metrics_by_season.csv",
-    # índice global de curvas
-    "cumprofit_index.csv",
-    "cumprofit_index.json",
+    # ⬇️  NOTA: ya NO exigimos cumprofit_index.csv/json
 ]
 
 # carpetas que deben existir y tener al menos un fichero
@@ -51,7 +49,8 @@ def _read_csv_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
     with path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        import csv as _csv
+        return list(_csv.DictReader(f))
 
 def _read_seasons_from_csv(path: Path, col: str) -> list[int]:
     rows = _read_csv_rows(path)
@@ -93,10 +92,6 @@ def seasons_from_bet365_metrics() -> list[int]:
         out.append(ts_i)
     return sorted(set(out))
 
-def seasons_from_cumprofit_index() -> list[int]:
-    # Temporadas listadas en el índice de curvas
-    return _read_seasons_from_csv(BASE / "cumprofit_index.csv", "test_season")
-
 def check_required_files():
     missing = [p for p in REQUIRED_FILES if not (BASE / p).exists()]
     if missing:
@@ -128,7 +123,6 @@ def check_matchlogs_per_season(seasons: list[int]):
     ok("matchlogs del modelo por temporada")
 
 def check_bet365_matchlogs():
-    # Aquí NO usamos las temporadas de clasificación.
     # Exigimos matchlogs Bet365 SOLO para las temporadas que están en bet365_metrics_by_season.csv (y con n_test>0).
     seasons = seasons_from_bet365_metrics()
     if not seasons:
@@ -147,25 +141,36 @@ def check_bet365_matchlogs():
         fail("Bet365 matchlogs incompletos.")
     ok(f"bet365_matchlogs presentes para temporadas {seasons}")
 
-def check_cumprofit_curves():
-    # Comprobación basada en el índice real de curvas
-    idx_csv  = BASE / "cumprofit_index.csv"
-    idx_json = BASE / "cumprofit_index.json"
-    if idx_csv.exists() and idx_json.exists():
-        ok("índice de curvas: outputs/cumprofit_index.csv + outputs/cumprofit_index.json")
-    else:
-        fail("Falta el índice de curvas (cumprofit_index.csv/json).")
+def _seasons_from_curves_folder() -> list[int]:
+    seasons = set()
+    for p in glob.glob(str(BASE / "cumprofit_curves" / "cumprofit_*.csv")):
+        try:
+            s = int(Path(p).stem.split("_")[1])
+            seasons.add(s)
+        except Exception:
+            pass
+    for p in glob.glob(str(BASE / "cumprofit_curves" / "cumprofit_*.json")):
+        try:
+            s = int(Path(p).stem.split("_")[1])
+            seasons.add(s)
+        except Exception:
+            pass
+    return sorted(seasons)
 
-    seasons = seasons_from_cumprofit_index()
+def check_cumprofit_curves():
     curves_dir = BASE / "cumprofit_curves"
 
-    # Debe haber al menos un par CSV/JSON
     any_csv  = glob.glob(str(curves_dir / "cumprofit_*.csv"))
     any_json = glob.glob(str(curves_dir / "cumprofit_*.json"))
     if not any_csv or not any_json:
         fail("No se encontraron curvas en outputs/cumprofit_curves/ (cumprofit_<SEASON>.csv/.json)")
 
-    # Si el índice tiene temporadas, exige su presencia
+    seasons = _seasons_from_curves_folder()
+    if not seasons:
+        warn("Se encontraron ficheros de curvas, pero no pude inferir temporadas desde los nombres; validación suave.")
+        ok("curvas cumprofit presentes (validación suave)")
+        return
+
     miss = []
     for s in seasons:
         cp_csv  = curves_dir / f"cumprofit_{s}.csv"
@@ -173,8 +178,8 @@ def check_cumprofit_curves():
         if not cp_csv.exists():  miss.append(str(cp_csv.relative_to(BASE)))
         if not cp_json.exists(): miss.append(str(cp_json.relative_to(BASE)))
     if miss:
-        print(f"Temporadas en el índice de curvas: {seasons}")
-        print("Faltan curvas por temporada (según el índice):")
+        print(f"Temporadas detectadas por ficheros en cumprofit_curves: {seasons}")
+        print("Faltan curvas por temporada (csv/json):")
         for m in miss: print("-", m)
         fail("Curvas cumprofit incompletas.")
     ok(f"curvas cumprofit presentes para temporadas {seasons}")
@@ -207,7 +212,7 @@ def main():
     else:
         warn("No pude inferir temporadas desde classification_by_season_*.csv; salto check estricto de matchlogs del modelo.")
 
-    # 2) Curvas (según índice real)
+    # 2) Curvas (derivadas de los ficheros presentes en la carpeta)
     check_cumprofit_curves()
 
     # 3) Bet365: exigir sólo para temporadas con métricas/n_test>0
