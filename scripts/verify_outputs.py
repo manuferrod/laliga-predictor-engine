@@ -1,3 +1,4 @@
+# scripts/verify_outputs.py
 from pathlib import Path
 import sys, csv, glob
 
@@ -24,15 +25,15 @@ REQUIRED_FILES = [
     # baseline bet365 (grid + métricas por temporada)
     "bet365_grid.json",
     "bet365_metrics_by_season.csv",
-    # ⬇️  NOTA: ya NO exigimos cumprofit_index.csv/json
+    # NOTA: ya NO exigimos cumprofit_index.csv/json
 ]
 
 # carpetas que deben existir y tener al menos un fichero
+# ⚠️ cumprofit_curves deja de ser obligatoria
 REQUIRED_NONEMPTY_DIRS = [
     "matchlogs_base",
     "matchlogs_smote",
     "bet365_matchlogs",
-    "cumprofit_curves",
 ]
 
 def fail(msg: str):
@@ -106,6 +107,7 @@ def check_required_dirs():
             fail(f"Falta el directorio outputs/{d}")
         if not any(p.iterdir()):
             fail(f"Directorio vacío: outputs/{d}")
+    ok("directorios base (modelo/baseline) presentes")
 
 def check_matchlogs_per_season(seasons: list[int]):
     # Los matchlogs del modelo (base/smote) se exigen para las temporadas de clasificación
@@ -157,17 +159,20 @@ def _seasons_from_curves_folder() -> list[int]:
             pass
     return sorted(seasons)
 
-def check_cumprofit_curves():
+def check_cumprofit_curves_optional():
     curves_dir = BASE / "cumprofit_curves"
-
+    if not curves_dir.exists():
+        warn("No existe outputs/cumprofit_curves; las curvas acumuladas son opcionales.")
+        return
     any_csv  = glob.glob(str(curves_dir / "cumprofit_*.csv"))
     any_json = glob.glob(str(curves_dir / "cumprofit_*.json"))
     if not any_csv or not any_json:
-        fail("No se encontraron curvas en outputs/cumprofit_curves/ (cumprofit_<SEASON>.csv/.json)")
+        warn("outputs/cumprofit_curves existe pero no hay (cumprofit_<SEASON>.csv/.json). Validación opcional omitida.")
+        return
 
     seasons = _seasons_from_curves_folder()
     if not seasons:
-        warn("Se encontraron ficheros de curvas, pero no pude inferir temporadas desde los nombres; validación suave.")
+        warn("Se encontraron ficheros de curvas, pero no pude inferir temporadas; validación suave.")
         ok("curvas cumprofit presentes (validación suave)")
         return
 
@@ -212,8 +217,8 @@ def main():
     else:
         warn("No pude inferir temporadas desde classification_by_season_*.csv; salto check estricto de matchlogs del modelo.")
 
-    # 2) Curvas (derivadas de los ficheros presentes en la carpeta)
-    check_cumprofit_curves()
+    # 2) Curvas (opcionales)
+    check_cumprofit_curves_optional()
 
     # 3) Bet365: exigir sólo para temporadas con métricas/n_test>0
     check_bet365_matchlogs()
