@@ -28,6 +28,12 @@ jobs:
       - name: Run Stage 2
         run: python scripts/run_stage2.py
 
+      - name: Normalize curves layout (make generic copies)
+        run: python scripts/normalize_curves_layout.py
+
+      - name: Verify outputs
+        run: python scripts/verify_outputs.py
+
       - name: Verify outputs
         run: python scripts/verify_outputs.py
 
