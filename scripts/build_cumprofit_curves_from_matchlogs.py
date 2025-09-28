@@ -144,6 +144,8 @@ def build_curves_for_season(season: int) -> tuple[pd.DataFrame, dict] | tuple[No
     return series_df, summary
 
 def main():
+    CURVES_DIR.mkdir(parents=True, exist_ok=True)
+    
     # Detectar temporadas disponibles por matchlogs del modelo
     if not ML_MODEL_DIR.exists():
         print("No hay outputs/matchlogs_base; nada que hacer.")
