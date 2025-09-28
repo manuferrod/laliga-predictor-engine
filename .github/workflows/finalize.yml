@@ -27,7 +27,10 @@ jobs:
 
       - name: Run Stage 2
         run: python scripts/run_stage2.py
-
+        
+      - name: Build cumprofit curves (from matchlogs)
+        run: python scripts/build_cumprofit_curves_from_matchlogs.py
+        
       - name: Verify outputs
         run: python scripts/verify_outputs.py
 
