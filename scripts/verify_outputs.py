@@ -1,41 +1,12 @@
 # scripts/verify_outputs.py
 from pathlib import Path
-import sys, csv, glob
+import sys, glob, re
 
 BASE = Path("outputs")
 
-# ficheros "base" obligatorios (sin temporada)
-REQUIRED_FILES = [
-    # clasificación (modelo vs smote)
-    "confusion_grid_base.json",
-    "confusion_grid_smote.json",
-    "classification_grid_base.json",
-    "classification_grid_smote.json",
-    "classification_by_season_base.csv",
-    "classification_by_season_smote.csv",
-    "roc_grid_base.json",
-    "roc_grid_smote.json",
-    "roc_by_season_base.csv",
-    "roc_by_season_smote.csv",
-    # roi por temporada (cabeceras y flat csv)
-    "roi_by_season_base.json",
-    "roi_by_season_base.csv",
-    "roi_by_season_smote.json",
-    "roi_by_season_smote.csv",
-    # baseline bet365 (grid + métricas por temporada)
-    "bet365_grid.json",
-    "bet365_metrics_by_season.csv",
-    # NOTA: ya NO exigimos cumprofit_index.csv/json
-]
-
-# carpetas que deben existir y tener al menos un fichero
-# ⚠️ cumprofit_curves deja de ser obligatoria
-REQUIRED_NONEMPTY_DIRS = [
-    "matchlogs_base",
-    "matchlogs_smote",
-    "bet365_matchlogs",
-]
-
+# ---------------------------
+# Utilidades de logging
+# ---------------------------
 def fail(msg: str):
     print(f"❌ {msg}")
     sys.exit(1)
@@ -46,6 +17,9 @@ def warn(msg: str):
 def ok(msg: str):
     print(f"OK {msg}")
 
+# ---------------------------
+# I/O helpers
+# ---------------------------
 def _read_csv_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -53,7 +27,7 @@ def _read_csv_rows(path: Path) -> list[dict]:
         import csv as _csv
         return list(_csv.DictReader(f))
 
-def _read_seasons_from_csv(path: Path, col: str) -> list[int]:
+def _read_seasons_from_csv(path: Path, col: str = "Season") -> list[int]:
     rows = _read_csv_rows(path)
     vals = set()
     for r in rows:
@@ -66,165 +40,129 @@ def _read_seasons_from_csv(path: Path, col: str) -> list[int]:
             pass
     return sorted(vals)
 
-def seasons_from_classification() -> list[int]:
-    # Unión de temporadas presentes en los CSV de clasificación
-    s1 = _read_seasons_from_csv(BASE / "classification_by_season_base.csv", "Season")
-    s2 = _read_seasons_from_csv(BASE / "classification_by_season_smote.csv", "Season")
-    return sorted(set(s1) | set(s2))
+# ---------------------------
+# Nuevos ficheros requeridos
+# ---------------------------
+REQUIRED_FILES = [
+    # reportes agregados por temporada / modelo
+    "classification_report_by_season.csv",
+    "metrics_main_by_season.csv",
+    "metrics_market_by_season.csv",
+    "metrics_market_overall.json",
+    "confusion_matrices_by_season.json",
+    "roc_curves_by_season.json",
+    # futuros
+    "future_predictions_2025.csv",
+    "future_predictions_2025.json",
+]
 
-def seasons_from_bet365_metrics() -> list[int]:
-    # Temporadas en las que tenemos métricas del baseline Bet365
-    rows = _read_csv_rows(BASE / "bet365_metrics_by_season.csv")
-    out = []
-    for r in rows:
-        ts = r.get("test_season")
-        ntest = r.get("n_test")
-        try:
-            ts_i = int(float(ts))
-        except Exception:
-            continue
-        # si existe n_test y es numérico, exige n_test>0
-        if ntest is not None:
-            try:
-                if int(float(ntest)) <= 0:
-                    continue
-            except Exception:
-                pass
-        out.append(ts_i)
-    return sorted(set(out))
+SUMMARY_RE = re.compile(r"^future_predictions_summary_\d{8}-\d{6}\.json$")  # YYYYMMDD-XXXXXX
 
+# ---------------------------
+# Checks
+# ---------------------------
 def check_required_files():
     missing = [p for p in REQUIRED_FILES if not (BASE / p).exists()]
     if missing:
         for m in missing:
             print(f"- Falta outputs/{m}")
         fail("Faltan archivos obligatorios.")
+    ok("ficheros obligatorios presentes")
 
-def check_required_dirs():
-    for d in REQUIRED_NONEMPTY_DIRS:
-        p = BASE / d
+def seasons_from_sources() -> list[int]:
+    # Deriva temporadas esperadas de los CSV agregados principales
+    s1 = _read_seasons_from_csv(BASE / "classification_report_by_season.csv", "Season")
+    s2 = _read_seasons_from_csv(BASE / "metrics_main_by_season.csv", "Season")
+    seasons = sorted(set(s1) | set(s2))
+    if seasons:
+        print(f"Temporadas detectadas (main): {seasons}")
+    else:
+        warn("No pude inferir temporadas desde los CSV principales; se omite check estricto de matchlogs 'main'.")
+    return seasons
+
+def seasons_from_market() -> list[int]:
+    s = _read_seasons_from_csv(BASE / "metrics_market_by_season.csv", "Season")
+    if s:
+        print(f"Temporadas detectadas (market): {s}")
+    else:
+        warn("No pude inferir temporadas desde metrics_market_by_season.csv; se omite check estricto de matchlogs_market.")
+    return s
+
+def check_matchlogs_main(seasons: list[int]):
+    if not seasons:
+        return
+    miss = []
+    for y in seasons:
+        p = BASE / f"matchlogs_{y}.csv"
         if not p.exists():
-            fail(f"Falta el directorio outputs/{d}")
-        if not any(p.iterdir()):
-            fail(f"Directorio vacío: outputs/{d}")
-    ok("directorios base (modelo/baseline) presentes")
-
-def check_matchlogs_per_season(seasons: list[int]):
-    # Los matchlogs del modelo (base/smote) se exigen para las temporadas de clasificación
-    miss = []
-    for s in seasons:
-        for tag, folder in [("base","matchlogs_base"), ("smote","matchlogs_smote")]:
-            csvp  = BASE / folder / f"matchlog_{s}.csv"
-            jsonp = BASE / folder / f"matchlog_{s}.json"
-            if not csvp.exists():  miss.append(str(csvp.relative_to(BASE)))
-            if not jsonp.exists(): miss.append(str(jsonp.relative_to(BASE)))
+            miss.append(str(p.relative_to(BASE)))
     if miss:
-        print("Faltan matchlogs del modelo por temporada:")
-        for m in miss: print("-", m)
-        fail("Matchlogs (modelo) incompletos.")
-    ok("matchlogs del modelo por temporada")
+        print("Faltan matchlogs por temporada (main):")
+        for m in miss:
+            print("-", m)
+        fail("Matchlogs (main) incompletos.")
+    ok("matchlogs (main) por temporada presentes")
 
-def check_bet365_matchlogs():
-    # Exigimos matchlogs Bet365 SOLO para las temporadas que están en bet365_metrics_by_season.csv (y con n_test>0).
-    seasons = seasons_from_bet365_metrics()
+def check_matchlogs_market(seasons: list[int]):
     if not seasons:
-        warn("No se detectaron temporadas en bet365_metrics_by_season.csv con n_test>0; se omite check estricto de bet365_matchlogs.")
         return
     miss = []
-    for s in seasons:
-        csvp  = BASE / "bet365_matchlogs" / f"matchlog_{s}.csv"
-        jsonp = BASE / "bet365_matchlogs" / f"matchlog_{s}.json"
-        if not csvp.exists():  miss.append(str(csvp.relative_to(BASE)))
-        if not jsonp.exists(): miss.append(str(jsonp.relative_to(BASE)))
+    for y in seasons:
+        p = BASE / f"matchlogs_market_{y}.csv"
+        if not p.exists():
+            miss.append(str(p.relative_to(BASE)))
     if miss:
-        print(f"Temporadas baseline Bet365 detectadas (n_test>0): {seasons}")
-        print("Faltan bet365_matchlogs por temporada:")
-        for m in miss: print("-", m)
-        fail("Bet365 matchlogs incompletos.")
-    ok(f"bet365_matchlogs presentes para temporadas {seasons}")
+        print("Faltan matchlogs por temporada (market):")
+        for m in miss:
+            print("-", m)
+        fail("Matchlogs (market) incompletos.")
+    ok("matchlogs (market) por temporada presentes")
 
-def _seasons_from_curves_folder() -> list[int]:
-    seasons = set()
-    for p in glob.glob(str(BASE / "cumprofit_curves" / "cumprofit_*.csv")):
-        try:
-            s = int(Path(p).stem.split("_")[1])
-            seasons.add(s)
-        except Exception:
-            pass
-    for p in glob.glob(str(BASE / "cumprofit_curves" / "cumprofit_*.json")):
-        try:
-            s = int(Path(p).stem.split("_")[1])
-            seasons.add(s)
-        except Exception:
-            pass
-    return sorted(seasons)
+def check_future_summaries():
+    # Al menos un summary con patrón correcto
+    files = [Path(p).name for p in glob.glob(str(BASE / "future_predictions_summary_*.json"))]
+    if not files:
+        fail("No se encontraron future_predictions_summary_YYYYMMDD-XXXXXX.json")
+    bad = [f for f in files if not SUMMARY_RE.match(f)]
+    if bad:
+        warn("Se encontraron summary con nombre fuera de patrón (se ignoran): " + ", ".join(bad))
+    good = [f for f in files if SUMMARY_RE.match(f)]
+    if not good:
+        fail("Existen summaries pero ninguno cumple patrón YYYYMMDD-XXXXXX.")
+    ok(f"future_predictions_summary OK (encontrados: {len(good)})")
 
-def check_cumprofit_curves_optional():
-    curves_dir = BASE / "cumprofit_curves"
-    if not curves_dir.exists():
-        warn("No existe outputs/cumprofit_curves; las curvas acumuladas son opcionales.")
-        return
-    any_csv  = glob.glob(str(curves_dir / "cumprofit_*.csv"))
-    any_json = glob.glob(str(curves_dir / "cumprofit_*.json"))
-    if not any_csv or not any_json:
-        warn("outputs/cumprofit_curves existe pero no hay (cumprofit_<SEASON>.csv/.json). Validación opcional omitida.")
-        return
-
-    seasons = _seasons_from_curves_folder()
-    if not seasons:
-        warn("Se encontraron ficheros de curvas, pero no pude inferir temporadas; validación suave.")
-        ok("curvas cumprofit presentes (validación suave)")
-        return
-
-    miss = []
-    for s in seasons:
-        cp_csv  = curves_dir / f"cumprofit_{s}.csv"
-        cp_json = curves_dir / f"cumprofit_{s}.json"
-        if not cp_csv.exists():  miss.append(str(cp_csv.relative_to(BASE)))
-        if not cp_json.exists(): miss.append(str(cp_json.relative_to(BASE)))
-    if miss:
-        print(f"Temporadas detectadas por ficheros en cumprofit_curves: {seasons}")
-        print("Faltan curvas por temporada (csv/json):")
-        for m in miss: print("-", m)
-        fail("Curvas cumprofit incompletas.")
-    ok(f"curvas cumprofit presentes para temporadas {seasons}")
-
-def check_comparisons():
-    # Los comparativos "por temporada" del modelo base son obligatorios
+def check_confusions_and_roc_exist():
     need = [
-        BASE / "comparison_season_base_vs_bet365.csv",
-        BASE / "comparison_season_base_vs_bet365.json",
+        BASE / "confusion_matrices_by_season.json",
+        BASE / "roc_curves_by_season.json",
     ]
     missing = [str(p.relative_to(BASE)) for p in need if not p.exists()]
     if missing:
-        print("Faltan comparativos 'season' modelo vs Bet365:")
-        for m in missing: print("-", m)
-        fail("Comparativos por temporada incompletos.")
-    ok("comparativos por temporada (modelo base vs Bet365)")
+        print("Faltan agregados de confusión/ROC:")
+        for m in missing:
+            print("-", m)
+        fail("confusion/roc por temporada incompletos.")
+    ok("confusion_matrices_by_season y roc_curves_by_season presentes")
 
 def main():
     if not BASE.exists():
         fail("No existe outputs/.")
 
+    # 1) fijos obligatorios
     check_required_files()
-    check_required_dirs()
 
-    # 1) Matchlogs del modelo (base/smote) según temporadas de clasificación
-    seasons_cls = seasons_from_classification()
-    if seasons_cls:
-        print(f"Temporadas detectadas (clasificación): {seasons_cls}")
-        check_matchlogs_per_season(seasons_cls)
-    else:
-        warn("No pude inferir temporadas desde classification_by_season_*.csv; salto check estricto de matchlogs del modelo.")
+    # 2) futuros (summary con patrón)
+    check_future_summaries()
 
-    # 2) Curvas (opcionales)
-    check_cumprofit_curves_optional()
+    # 3) matchlogs main y market en base a temporadas detectadas
+    seasons_main = seasons_from_sources()
+    check_matchlogs_main(seasons_main)
 
-    # 3) Bet365: exigir sólo para temporadas con métricas/n_test>0
-    check_bet365_matchlogs()
+    seasons_mkt = seasons_from_market()
+    check_matchlogs_market(seasons_mkt)
 
-    # 4) Comparativos requeridos
-    check_comparisons()
+    # 4) confusión/roc agregados
+    check_confusions_and_roc_exist()
 
     print("✔ outputs/ verificado correctamente.")
 
