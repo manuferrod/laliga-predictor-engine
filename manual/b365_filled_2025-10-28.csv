@@ -3,9 +3,10 @@ row_id,Date,HomeTeam_norm,AwayTeam_norm,B365H,B365D,B365A
 7700,2025-11-01,ath madrid,sevilla,1.36,5.00,8.50
 7706,2025-11-01,real madrid,valencia,1.20,7.50,10.00
 7708,2025-11-01,sociedad,ath bilbao,2.70,3.00,2.75
-7709,2025-11-01,villarreal,vallecano,1.72,3.75,4.75
+7709,2025-11-01,villarreal,vallecano,1.73,3.75,4.75
 7701,2025-11-02,alaves,espanol,2.30,3.10,3.25
 7702,2025-11-02,barcelona,elche,1.22,6.50,12.00
 7704,2025-11-02,levante,celta,2.70,3.60,2.37
 7705,2025-11-02,betis,mallorca,1.57,4.00,5.50
 7707,2025-11-03,real oviedo,osasuna,3.00,3.00,2.55
+
