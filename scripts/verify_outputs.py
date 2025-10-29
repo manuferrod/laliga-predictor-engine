@@ -3,6 +3,7 @@ from pathlib import Path
 import sys, glob, re
 
 BASE = Path("outputs")
+RADAR_DIR = BASE / "radar_prematch"
 
 # ---------------------------
 # Utilidades de logging
@@ -26,6 +27,14 @@ def _read_csv_rows(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8") as f:
         import csv as _csv
         return list(_csv.DictReader(f))
+
+def _read_csv_header(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as f:
+        import csv as _csv
+        reader = _csv.DictReader(f)
+        return reader.fieldnames or []
 
 def _read_seasons_from_csv(path: Path, col: str = "Season") -> list[int]:
     rows = _read_csv_rows(path)
@@ -88,6 +97,18 @@ def seasons_from_market() -> list[int]:
         warn("No pude inferir temporadas desde metrics_market_by_season.csv; se omite check estricto de matchlogs_market.")
     return s
 
+def seasons_from_future_predictions() -> list[int]:
+    # Une temporadas desde todos los future_predictions_*.csv presentes
+    seasons = set()
+    for p in glob.glob(str(BASE / "future_predictions_*.csv")):
+        seasons |= set(_read_seasons_from_csv(Path(p), "Season"))
+    seasons = sorted(seasons)
+    if seasons:
+        print(f"Temporadas detectadas (future predictions): {seasons}")
+    else:
+        warn("No pude inferir temporadas desde future_predictions_*.csv; el check de radar será laxo (existencia básica).")
+    return seasons
+
 def check_matchlogs_main(seasons: list[int]):
     if not seasons:
         return
@@ -144,6 +165,69 @@ def check_confusions_and_roc_exist():
         fail("confusion/roc por temporada incompletos.")
     ok("confusion_matrices_by_season y roc_curves_by_season presentes")
 
+# ---------------------------
+# Nuevo: verificación radar_prematch
+# ---------------------------
+RADAR_MIN_COLS = [
+    "Season","Date","Matchweek","HomeTeam_norm","AwayTeam_norm","match_id",
+    "generated_at","norm_version"
+]
+# Al menos un eje normalizado clave para garantizar integridad
+RADAR_MIN_ANY = [
+    "home_avg_xg_last7_norm", "away_avg_xg_last7_norm",
+    "home_avg_shotsontarget_last7_norm", "away_avg_shotsontarget_last7_norm"
+]
+
+def check_radar_prematch(seasons_expected: list[int]):
+    # Directorio y schema
+    if not RADAR_DIR.exists():
+        fail("No existe outputs/radar_prematch/. Ejecuta la generación de radar prematch.")
+    schema = RADAR_DIR / "schemas.json"
+    if not schema.exists():
+        fail("Falta outputs/radar_prematch/schemas.json")
+
+    # Archivos por temporada
+    if seasons_expected:
+        seasons = seasons_expected
+    else:
+        # Laxo: verifica que exista al menos un CSV de radar
+        files = sorted(glob.glob(str(RADAR_DIR / "radar_prematch_*.csv")))
+        if not files:
+            fail("No se encontraron CSV de radar prematch (radar_prematch_*.csv).")
+        ok(f"radar_prematch: encontrados {len(files)} CSV (no se pudo inferir temporadas).")
+        return
+
+    miss = []
+    for y in seasons:
+        p = RADAR_DIR / f"radar_prematch_{int(y)}.csv"
+        if not p.exists():
+            miss.append(str(p.relative_to(BASE)))
+            continue
+
+        # Cabecera mínima y no vacío
+        header = _read_csv_header(p)
+        rows = _read_csv_rows(p)
+
+        if not rows:
+            fail(f"{p} existe pero está vacío.")
+
+        missing_cols = [c for c in RADAR_MIN_COLS if c not in header]
+        if missing_cols:
+            fail(f"{p.name} carece de columnas mínimas: {', '.join(missing_cols)}")
+
+        if not any(col in header for col in RADAR_MIN_ANY):
+            fail(f"{p.name} no contiene columnas de ejes normalizados esperadas (xG7/OnTarget7 *_norm).")
+
+    if miss:
+        print("Faltan archivos radar_prematch por temporada:")
+        for m in miss:
+            print("-", m)
+        fail("radar_prematch incompleto.")
+    ok("radar_prematch por temporada presentes y válidos")
+
+# ---------------------------
+# Main
+# ---------------------------
 def main():
     if not BASE.exists():
         fail("No existe outputs/.")
@@ -163,6 +247,10 @@ def main():
 
     # 4) confusión/roc agregados
     check_confusions_and_roc_exist()
+
+    # 5) radar_prematch (temporadas tomadas de future_predictions_*.csv)
+    seasons_future = seasons_from_future_predictions()
+    check_radar_prematch(seasons_future)
 
     print("✔ outputs/ verificado correctamente.")
 
