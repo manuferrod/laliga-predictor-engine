@@ -41,6 +41,9 @@ def _read_seasons_from_csv(path: Path, col: str = "Season") -> list[int]:
     vals = set()
     for r in rows:
         s = r.get(col)
+        # tolerancia: season en minúscula
+        if s is None:
+            s = r.get(col.lower())
         if s is None or str(s).strip() == "":
             continue
         try:
@@ -172,7 +175,6 @@ RADAR_MIN_COLS = [
     "Season","Date","Matchweek","HomeTeam_norm","AwayTeam_norm","match_id",
     "generated_at","norm_version"
 ]
-# Al menos un eje normalizado clave para garantizar integridad
 RADAR_MIN_ANY = [
     "home_avg_xg_last7_norm", "away_avg_xg_last7_norm",
     "home_avg_shotsontarget_last7_norm", "away_avg_shotsontarget_last7_norm"
@@ -186,11 +188,8 @@ def check_radar_prematch(seasons_expected: list[int]):
     if not schema.exists():
         fail("Falta outputs/radar_prematch/schemas.json")
 
-    # Archivos por temporada
-    if seasons_expected:
-        seasons = seasons_expected
-    else:
-        # Laxo: verifica que exista al menos un CSV de radar
+    # Si no hay temporadas esperadas desde future_predictions, valida existencia básica
+    if not seasons_expected:
         files = sorted(glob.glob(str(RADAR_DIR / "radar_prematch_*.csv")))
         if not files:
             fail("No se encontraron CSV de radar prematch (radar_prematch_*.csv).")
@@ -198,24 +197,35 @@ def check_radar_prematch(seasons_expected: list[int]):
         return
 
     miss = []
-    for y in seasons:
+    for y in seasons_expected:
         p = RADAR_DIR / f"radar_prematch_{int(y)}.csv"
         if not p.exists():
             miss.append(str(p.relative_to(BASE)))
             continue
 
-        # Cabecera mínima y no vacío
         header = _read_csv_header(p)
         rows = _read_csv_rows(p)
-
         if not rows:
             fail(f"{p} existe pero está vacío.")
 
-        missing_cols = [c for c in RADAR_MIN_COLS if c not in header]
-        if missing_cols:
-            fail(f"{p.name} carece de columnas mínimas: {', '.join(missing_cols)}")
+        # Tolerancia: Season o season (case-insensitive)
+        header_lower = {h.lower() for h in (header or [])}
+        has_season = ("season" in header_lower)
+        if not has_season:
+            fail(f"{p.name} carece de columna Season (aceptamos Season/season).")
 
-        if not any(col in header for col in RADAR_MIN_ANY):
+        # Otras mínimas (case-insensitive)
+        must_have = ["date","matchweek","hometeam_norm","awayteam_norm","match_id","generated_at","norm_version"]
+        missing = [c for c in must_have if c not in header_lower]
+        if missing:
+            fail(f"{p.name} carece de columnas mínimas: {', '.join(missing)}")
+
+        # Al menos algún eje normalizado esperado
+        expected_norms = {
+            "home_avg_xg_last7_norm","away_avg_xg_last7_norm",
+            "home_avg_shotsontarget_last7_norm","away_avg_shotsontarget_last7_norm"
+        }
+        if not (expected_norms & set(h.lower() for h in header)):
             fail(f"{p.name} no contiene columnas de ejes normalizados esperadas (xG7/OnTarget7 *_norm).")
 
     if miss:
