@@ -19,31 +19,58 @@ def ok(msg: str):
     print(f"OK {msg}")
 
 # ---------------------------
+# Helpers de normalización de cabeceras
+# ---------------------------
+_BOM = "\ufeff"
+
+def _norm_header(name: str) -> str:
+    if name is None:
+        return ""
+    return name.replace("\r", "").replace("\n", "").strip().lstrip(_BOM)
+
+def _norm_headers(seq):
+    return [ _norm_header(x) for x in (seq or []) ]
+
+# ---------------------------
 # I/O helpers
 # ---------------------------
-def _read_csv_rows(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with path.open(newline="", encoding="utf-8") as f:
-        import csv as _csv
-        return list(_csv.DictReader(f))
-
 def _read_csv_header(path: Path) -> list[str]:
     if not path.exists():
         return []
     with path.open(newline="", encoding="utf-8") as f:
         import csv as _csv
         reader = _csv.DictReader(f)
-        return reader.fieldnames or []
+        return _norm_headers(reader.fieldnames)
+
+def _read_csv_rows(path: Path) -> list[dict]:
+    """Lee filas normalizando claves (quita BOM y espacios)."""
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as f:
+        import csv as _csv
+        reader = _csv.DictReader(f)
+        # Normaliza fieldnames y remapea cada fila a esas claves
+        raw_fields = reader.fieldnames or []
+        fields = _norm_headers(raw_fields)
+        rows = []
+        for raw in reader:
+            # Construye dict con claves normalizadas
+            out = {}
+            for k_raw, v in raw.items():
+                k = _norm_header(k_raw)
+                out[k] = v
+            rows.append(out)
+        return rows
 
 def _read_seasons_from_csv(path: Path, col: str = "Season") -> list[int]:
     rows = _read_csv_rows(path)
+    target = _norm_header(col)
     vals = set()
     for r in rows:
-        s = r.get(col)
-        # tolerancia: season en minúscula
+        # tolerancia Season/season
+        s = r.get(target)
         if s is None:
-            s = r.get(col.lower())
+            s = r.get(target.lower())
         if s is None or str(s).strip() == "":
             continue
         try:
@@ -208,8 +235,10 @@ def check_radar_prematch(seasons_expected: list[int]):
         if not rows:
             fail(f"{p} existe pero está vacío.")
 
-        # Tolerancia: Season o season (case-insensitive)
+        # Cabeceras a minúsculas para comparar sin sensibilidad
         header_lower = {h.lower() for h in (header or [])}
+
+        # Tolerancia: Season o season (y BOM ya eliminado)
         has_season = ("season" in header_lower)
         if not has_season:
             fail(f"{p.name} carece de columna Season (aceptamos Season/season).")
@@ -225,7 +254,7 @@ def check_radar_prematch(seasons_expected: list[int]):
             "home_avg_xg_last7_norm","away_avg_xg_last7_norm",
             "home_avg_shotsontarget_last7_norm","away_avg_shotsontarget_last7_norm"
         }
-        if not (expected_norms & set(h.lower() for h in header)):
+        if not (expected_norms & header_lower):
             fail(f"{p.name} no contiene columnas de ejes normalizados esperadas (xG7/OnTarget7 *_norm).")
 
     if miss:
