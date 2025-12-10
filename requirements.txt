@@ -20,7 +20,7 @@ fake-useragent==1.5.1
 python-dateutil==2.9.0.post0
 pytz==2024.1
 tqdm==4.66.4
-soccerdata>=1.5,<2.0
+soccerdata>=1.8.7
 
 # Ejecutar notebooks "sin cabeza" (para el runner de CI)
 jupyter==1.0.0
