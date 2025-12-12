@@ -1,5 +1,5 @@
 row_id,Date,HomeTeam_norm,AwayTeam_norm,B365H,B365D,B365A
-7760,2025-12-12,sociedad,girona,1,72,3.80,4.75
+7760,2025-12-12,sociedad,girona,1.72,3.80,4.75
 7752,2025-12-13,ath madrid,valencia,1.28,5.25,12.00
 7754,2025-12-13,barcelona,osasuna,1.20,7.00,12.00
 7755,2025-12-13,getafe,espanol,2.50,2.80,3.25
@@ -9,3 +9,4 @@ row_id,Date,HomeTeam_norm,AwayTeam_norm,B365H,B365D,B365A
 7757,2025-12-14,celta,ath bilbao,2.75,3.25,2.62
 7761,2025-12-14,sevilla,real oviedo,1.90,3.40,4.20
 7759,2025-12-15,vallecano,betis,2.60,3.40,2.70
+
