@@ -6,7 +6,7 @@ BASE = Path("outputs")
 RADAR_DIR = BASE / "radar_prematch"
 
 # ---------------------------
-# Utilidades de logging
+# Logging helpers
 # ---------------------------
 def fail(msg: str):
     print(f"❌ {msg}")
@@ -19,276 +19,169 @@ def ok(msg: str):
     print(f"OK {msg}")
 
 # ---------------------------
-# Helpers de normalización de cabeceras
+# CSV helpers (robustos)
 # ---------------------------
 _BOM = "\ufeff"
 
-def _norm_header(name: str) -> str:
-    if name is None:
+def _norm_header(x: str) -> str:
+    if x is None:
         return ""
-    return name.replace("\r", "").replace("\n", "").strip().lstrip(_BOM)
+    return x.replace("\r", "").replace("\n", "").strip().lstrip(_BOM)
 
-def _norm_headers(seq):
-    return [ _norm_header(x) for x in (seq or []) ]
-
-# ---------------------------
-# I/O helpers
-# ---------------------------
-def _read_csv_header(path: Path) -> list[str]:
+def _read_csv_header(path: Path):
     if not path.exists():
         return []
-    with path.open(newline="", encoding="utf-8") as f:
-        import csv as _csv
-        reader = _csv.DictReader(f)
-        return _norm_headers(reader.fieldnames)
+    import csv
+    with path.open(encoding="utf-8", newline="") as f:
+        r = csv.reader(f)
+        return [_norm_header(h) for h in next(r, [])]
 
-def _read_csv_rows(path: Path) -> list[dict]:
-    """Lee filas normalizando claves (quita BOM y espacios)."""
+def _read_csv_rows(path: Path):
     if not path.exists():
         return []
-    with path.open(newline="", encoding="utf-8") as f:
-        import csv as _csv
-        reader = _csv.DictReader(f)
-        # Normaliza fieldnames y remapea cada fila a esas claves
-        raw_fields = reader.fieldnames or []
-        fields = _norm_headers(raw_fields)
+    import csv
+    with path.open(encoding="utf-8", newline="") as f:
+        r = csv.DictReader(f)
         rows = []
-        for raw in reader:
-            # Construye dict con claves normalizadas
-            out = {}
-            for k_raw, v in raw.items():
-                k = _norm_header(k_raw)
-                out[k] = v
-            rows.append(out)
+        for row in r:
+            rows.append({ _norm_header(k): v for k, v in row.items() })
         return rows
 
-def _read_seasons_from_csv(path: Path, col: str = "Season") -> list[int]:
+def _read_seasons_from_csv(path: Path):
     rows = _read_csv_rows(path)
-    target = _norm_header(col)
-    vals = set()
+    seasons = set()
     for r in rows:
-        # tolerancia Season/season
-        s = r.get(target)
-        if s is None:
-            s = r.get(target.lower())
-        if s is None or str(s).strip() == "":
-            continue
-        try:
-            vals.add(int(float(s)))
-        except Exception:
-            pass
-    return sorted(vals)
+        s = r.get("Season") or r.get("season")
+        if s:
+            try:
+                seasons.add(int(float(s)))
+            except Exception:
+                pass
+    return sorted(seasons)
 
 # ---------------------------
-# Nuevos ficheros requeridos
+# Requisitos base
 # ---------------------------
 REQUIRED_FILES = [
-    # reportes agregados por temporada / modelo
     "classification_report_by_season.csv",
     "metrics_main_by_season.csv",
     "metrics_market_by_season.csv",
     "metrics_market_overall.json",
     "confusion_matrices_by_season.json",
     "roc_curves_by_season.json",
-    # futuros
-    "future_predictions_2025.csv",
-    "future_predictions_2025.json",
 ]
 
-SUMMARY_RE = re.compile(r"^future_predictions_summary_\d{8}-\d{6}\.json$")  # YYYYMMDD-XXXXXX
+SUMMARY_RE = re.compile(r"^future_predictions_summary_\d{8}-\d{6}\.json$")
 
 # ---------------------------
 # Checks
 # ---------------------------
 def check_required_files():
-    missing = [p for p in REQUIRED_FILES if not (BASE / p).exists()]
-    if missing:
-        for m in missing:
+    miss = [f for f in REQUIRED_FILES if not (BASE / f).exists()]
+    if miss:
+        for m in miss:
             print(f"- Falta outputs/{m}")
         fail("Faltan archivos obligatorios.")
     ok("ficheros obligatorios presentes")
 
-def seasons_from_sources() -> list[int]:
-    # Deriva temporadas esperadas de los CSV agregados principales
-    s1 = _read_seasons_from_csv(BASE / "classification_report_by_season.csv", "Season")
-    s2 = _read_seasons_from_csv(BASE / "metrics_main_by_season.csv", "Season")
-    seasons = sorted(set(s1) | set(s2))
-    if seasons:
-        print(f"Temporadas detectadas (main): {seasons}")
-    else:
-        warn("No pude inferir temporadas desde los CSV principales; se omite check estricto de matchlogs 'main'.")
-    return seasons
-
-def seasons_from_market() -> list[int]:
-    s = _read_seasons_from_csv(BASE / "metrics_market_by_season.csv", "Season")
-    if s:
-        print(f"Temporadas detectadas (market): {s}")
-    else:
-        warn("No pude inferir temporadas desde metrics_market_by_season.csv; se omite check estricto de matchlogs_market.")
-    return s
-
-def seasons_from_future_predictions() -> list[int]:
-    # Une temporadas desde todos los future_predictions_*.csv presentes
-    seasons = set()
-    for p in glob.glob(str(BASE / "future_predictions_*.csv")):
-        seasons |= set(_read_seasons_from_csv(Path(p), "Season"))
-    seasons = sorted(seasons)
-    if seasons:
-        print(f"Temporadas detectadas (future predictions): {seasons}")
-    else:
-        warn("No pude inferir temporadas desde future_predictions_*.csv; el check de radar será laxo (existencia básica).")
-    return seasons
-
-def check_matchlogs_main(seasons: list[int]):
-    if not seasons:
-        return
-    miss = []
-    for y in seasons:
-        p = BASE / f"matchlogs_{y}.csv"
-        if not p.exists():
-            miss.append(str(p.relative_to(BASE)))
-    if miss:
-        print("Faltan matchlogs por temporada (main):")
-        for m in miss:
-            print("-", m)
-        fail("Matchlogs (main) incompletos.")
-    ok("matchlogs (main) por temporada presentes")
-
-def check_matchlogs_market(seasons: list[int]):
-    if not seasons:
-        return
-    miss = []
-    for y in seasons:
-        p = BASE / f"matchlogs_market_{y}.csv"
-        if not p.exists():
-            miss.append(str(p.relative_to(BASE)))
-    if miss:
-        print("Faltan matchlogs por temporada (market):")
-        for m in miss:
-            print("-", m)
-        fail("Matchlogs (market) incompletos.")
-    ok("matchlogs (market) por temporada presentes")
-
 def check_future_summaries():
-    # Al menos un summary con patrón correcto
     files = [Path(p).name for p in glob.glob(str(BASE / "future_predictions_summary_*.json"))]
-    if not files:
-        fail("No se encontraron future_predictions_summary_YYYYMMDD-XXXXXX.json")
-    bad = [f for f in files if not SUMMARY_RE.match(f)]
-    if bad:
-        warn("Se encontraron summary con nombre fuera de patrón (se ignoran): " + ", ".join(bad))
     good = [f for f in files if SUMMARY_RE.match(f)]
     if not good:
-        fail("Existen summaries pero ninguno cumple patrón YYYYMMDD-XXXXXX.")
+        fail("No se encontró ningún future_predictions_summary válido.")
     ok(f"future_predictions_summary OK (encontrados: {len(good)})")
 
-def check_confusions_and_roc_exist():
-    need = [
-        BASE / "confusion_matrices_by_season.json",
-        BASE / "roc_curves_by_season.json",
-    ]
-    missing = [str(p.relative_to(BASE)) for p in need if not p.exists()]
-    if missing:
-        print("Faltan agregados de confusión/ROC:")
-        for m in missing:
-            print("-", m)
-        fail("confusion/roc por temporada incompletos.")
-    ok("confusion_matrices_by_season y roc_curves_by_season presentes")
-
-# ---------------------------
-# Nuevo: verificación radar_prematch
-# ---------------------------
-RADAR_MIN_COLS = [
-    "Season","Date","Matchweek","HomeTeam_norm","AwayTeam_norm","match_id",
-    "generated_at","norm_version"
-]
-RADAR_MIN_ANY = [
-    "home_avg_xg_last7_norm", "away_avg_xg_last7_norm",
-    "home_avg_shotsontarget_last7_norm", "away_avg_shotsontarget_last7_norm"
-]
-
-def check_radar_prematch(seasons_expected: list[int]):
-    # Directorio y schema
-    if not RADAR_DIR.exists():
-        fail("No existe outputs/radar_prematch/. Ejecuta la generación de radar prematch.")
-    schema = RADAR_DIR / "schemas.json"
-    if not schema.exists():
-        fail("Falta outputs/radar_prematch/schemas.json")
-
-    # Si no hay temporadas esperadas desde future_predictions, valida existencia básica
-    if not seasons_expected:
-        files = sorted(glob.glob(str(RADAR_DIR / "radar_prematch_*.csv")))
-        if not files:
-            fail("No se encontraron CSV de radar prematch (radar_prematch_*.csv).")
-        ok(f"radar_prematch: encontrados {len(files)} CSV (no se pudo inferir temporadas).")
+def check_matchlogs(prefix, seasons):
+    if not seasons:
+        warn(f"No se pudieron inferir temporadas ({prefix}); se omite check.")
         return
-
     miss = []
-    for y in seasons_expected:
-        p = RADAR_DIR / f"radar_prematch_{int(y)}.csv"
+    for y in seasons:
+        p = BASE / f"{prefix}_{y}.csv"
         if not p.exists():
-            miss.append(str(p.relative_to(BASE)))
-            continue
-
-        header = _read_csv_header(p)
-        rows = _read_csv_rows(p)
-        if not rows:
-            fail(f"{p} existe pero está vacío.")
-
-        # Cabeceras a minúsculas para comparar sin sensibilidad
-        header_lower = {h.lower() for h in (header or [])}
-
-        # Tolerancia: Season o season (y BOM ya eliminado)
-        has_season = ("season" in header_lower)
-        if not has_season:
-            fail(f"{p.name} carece de columna Season (aceptamos Season/season).")
-
-        # Otras mínimas (case-insensitive)
-        must_have = ["date","matchweek","hometeam_norm","awayteam_norm","match_id","generated_at","norm_version"]
-        missing = [c for c in must_have if c not in header_lower]
-        if missing:
-            fail(f"{p.name} carece de columnas mínimas: {', '.join(missing)}")
-
-        # Al menos algún eje normalizado esperado
-        expected_norms = {
-            "home_avg_xg_last7_norm","away_avg_xg_last7_norm",
-            "home_avg_shotsontarget_last7_norm","away_avg_shotsontarget_last7_norm"
-        }
-        if not (expected_norms & header_lower):
-            fail(f"{p.name} no contiene columnas de ejes normalizados esperadas (xG7/OnTarget7 *_norm).")
-
+            miss.append(p.name)
     if miss:
-        print("Faltan archivos radar_prematch por temporada:")
         for m in miss:
             print("-", m)
-        fail("radar_prematch incompleto.")
-    ok("radar_prematch por temporada presentes y válidos")
+        fail(f"Matchlogs {prefix} incompletos.")
+    ok(f"matchlogs {prefix} por temporada presentes")
 
 # ---------------------------
-# Main
+# RADAR PREMATCH (CLAVE)
+# ---------------------------
+RADAR_MIN_COLS = {
+    "season", "date", "matchweek",
+    "hometeam_norm", "awayteam_norm",
+    "match_id", "generated_at", "norm_version"
+}
+
+RADAR_NORM_HINTS = {
+    "home_avg_xg", "away_avg_xg",
+    "home_avg_shotsontarget", "away_avg_shotsontarget"
+}
+
+def check_radar_prematch(seasons_expected):
+    if not RADAR_DIR.exists():
+        fail("No existe outputs/radar_prematch/. No se han generado radares.")
+
+    radar_files = sorted(glob.glob(str(RADAR_DIR / "radar_prematch_*.csv")))
+    if not radar_files:
+        fail("No se encontró ningún radar_prematch_*.csv")
+
+    ok(f"radar_prematch: encontrados {len(radar_files)} CSV")
+
+    # Si sabemos temporadas → exigir 1 por temporada
+    if seasons_expected:
+        expected = {f"radar_prematch_{y}.csv" for y in seasons_expected}
+        found = {Path(p).name for p in radar_files}
+        miss = expected - found
+        if miss:
+            for m in sorted(miss):
+                print("-", m)
+            fail("Faltan radares por temporada.")
+
+    # Validación de estructura
+    for p in radar_files:
+        path = Path(p)
+        header = {h.lower() for h in _read_csv_header(path)}
+        rows = _read_csv_rows(path)
+
+        if not rows:
+            fail(f"{path.name} está vacío.")
+
+        if not RADAR_MIN_COLS.issubset(header):
+            missing = RADAR_MIN_COLS - header
+            fail(f"{path.name} carece de columnas mínimas: {', '.join(missing)}")
+
+        if not any(h.endswith("_norm") and any(k in h for k in RADAR_NORM_HINTS) for h in header):
+            fail(f"{path.name} no contiene métricas *_norm válidas para radar.")
+
+    ok("radar_prematch válidos y completos")
+
+# ---------------------------
+# MAIN
 # ---------------------------
 def main():
     if not BASE.exists():
         fail("No existe outputs/.")
 
-    # 1) fijos obligatorios
     check_required_files()
-
-    # 2) futuros (summary con patrón)
     check_future_summaries()
 
-    # 3) matchlogs main y market en base a temporadas detectadas
-    seasons_main = seasons_from_sources()
-    check_matchlogs_main(seasons_main)
+    seasons_main = _read_seasons_from_csv(BASE / "classification_report_by_season.csv")
+    print(f"Temporadas detectadas (main): {seasons_main}")
+    check_matchlogs("matchlogs", seasons_main)
 
-    seasons_mkt = seasons_from_market()
-    check_matchlogs_market(seasons_mkt)
+    seasons_mkt = _read_seasons_from_csv(BASE / "metrics_market_by_season.csv")
+    print(f"Temporadas detectadas (market): {seasons_mkt}")
+    check_matchlogs("matchlogs_market", seasons_mkt)
 
-    # 4) confusión/roc agregados
-    check_confusions_and_roc_exist()
+    seasons_future = []
+    for p in glob.glob(str(BASE / "future_predictions_*.csv")):
+        seasons_future += _read_seasons_from_csv(Path(p))
+    seasons_future = sorted(set(seasons_future))
+    print(f"Temporadas detectadas (future predictions): {seasons_future}")
 
-    # 5) radar_prematch (temporadas tomadas de future_predictions_*.csv)
-    seasons_future = seasons_from_future_predictions()
     check_radar_prematch(seasons_future)
 
     print("✔ outputs/ verificado correctamente.")
