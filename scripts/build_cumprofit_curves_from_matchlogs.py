@@ -7,14 +7,14 @@ import re
 import sys
 
 BASE = Path("outputs")
-ML_MODEL_DIR = BASE / "matchlogs_base"
-ML_B365_DIR  = BASE / "bet365_matchlogs"
+# AHORA todo está en outputs/, ya no hay subcarpetas para esto
 CURVES_DIR   = BASE / "cumprofit_curves"
 
 CLASS2LABEL = {0: "Away", 1: "Draw", 2: "Home"}
 TXT2LABEL   = {"A": "Away", "D": "Draw", "H": "Home"}
 
 def _season_from_name(path: Path) -> int | None:
+    # Busca 4 dígitos seguidos (ej: 2025)
     m = re.search(r"(\d{4})", path.stem)
     if not m:
         return None
@@ -30,7 +30,10 @@ def _ensure_float(s):
     return pd.to_numeric(s, errors="coerce")
 
 def _load_matchlog_model(season: int) -> pd.DataFrame | None:
-    p = ML_MODEL_DIR / f"matchlog_{season}.csv"
+    # Antes: ML_MODEL_DIR / f"matchlog_{season}.csv"
+    # Ahora: outputs/matchlogs_{season}.csv (PLURAL matchlogs)
+    p = BASE / f"matchlogs_{season}.csv"
+    
     if not p.exists():
         return None
     df = pd.read_csv(p)
@@ -42,7 +45,10 @@ def _load_matchlog_model(season: int) -> pd.DataFrame | None:
     return df
 
 def _load_matchlog_b365(season: int) -> pd.DataFrame | None:
-    p = ML_B365_DIR / f"matchlog_{season}.csv"
+    # Antes: ML_B365_DIR / f"matchlog_{season}.csv"
+    # Ahora: outputs/matchlogs_market_{season}.csv
+    p = BASE / f"matchlogs_market_{season}.csv"
+    
     if not p.exists():
         return None
     df = pd.read_csv(p)
@@ -144,28 +150,36 @@ def build_curves_for_season(season: int) -> tuple[pd.DataFrame, dict] | tuple[No
     return series_df, summary
 
 def main():
+    if not BASE.exists():
+        print("No existe outputs/; nada que hacer.")
+        sys.exit(0)
+
     CURVES_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Detectar temporadas disponibles por matchlogs del modelo
-    if not ML_MODEL_DIR.exists():
-        print("No hay outputs/matchlogs_base; nada que hacer.")
-        sys.exit(0)
+    # Detectar temporadas disponibles buscando matchlogs_YYYY.csv en la RAÍZ de outputs
+    # Filtramos para no coger 'matchlogs_market_' ni 'smote', solo los base.
+    base_matchlogs = []
+    for p in BASE.glob("matchlogs_*.csv"):
+        if "market" in p.name or "smote" in p.name:
+            continue
+        base_matchlogs.append(p)
 
     seasons = sorted({
         _season_from_name(p)
-        for p in ML_MODEL_DIR.glob("matchlog_*.csv")
+        for p in base_matchlogs
     } - {None})
 
     if not seasons:
-        print("No se detectaron temporadas en matchlogs_base.")
+        print("No se detectaron temporadas (matchlogs_YYYY.csv) en outputs/.")
         sys.exit(0)
 
-    CURVES_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Temporadas detectadas para curvas: {seasons}")
 
     index_rows = []
     for s in seasons:
         series_df, summary = build_curves_for_season(s)
         if series_df is None or series_df.empty:
+            print(f"⚠️  Season {s}: No se pudo cruzar modelo vs bet365 (o faltan archivos).")
             continue
 
         # CSV
