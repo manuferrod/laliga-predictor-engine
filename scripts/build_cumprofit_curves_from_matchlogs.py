@@ -7,14 +7,13 @@ import re
 import sys
 
 BASE = Path("outputs")
-# AHORA todo está en outputs/, ya no hay subcarpetas para esto
-CURVES_DIR   = BASE / "cumprofit_curves"
+CURVES_DIR = BASE / "cumprofit_curves"
 
+# Mapeos de texto (A/D/H) a Nombre completo
+TXT2LABEL = {"A": "Away", "D": "Draw", "H": "Home", "1": "Home", "0": "Draw", "2": "Away"}
 CLASS2LABEL = {0: "Away", 1: "Draw", 2: "Home"}
-TXT2LABEL   = {"A": "Away", "D": "Draw", "H": "Home"}
 
 def _season_from_name(path: Path) -> int | None:
-    # Busca 4 dígitos seguidos (ej: 2025)
     m = re.search(r"(\d{4})", path.stem)
     if not m:
         return None
@@ -29,97 +28,112 @@ def _safe_dt(s):
 def _ensure_float(s):
     return pd.to_numeric(s, errors="coerce")
 
-def _load_matchlog_model(season: int) -> pd.DataFrame | None:
-    # Antes: ML_MODEL_DIR / f"matchlog_{season}.csv"
-    # Ahora: outputs/matchlogs_{season}.csv (PLURAL matchlogs)
-    p = BASE / f"matchlogs_{season}.csv"
-    
-    if not p.exists():
+def _load_and_standardize(path: Path) -> pd.DataFrame | None:
+    if not path.exists():
         return None
-    df = pd.read_csv(p)
-    # columnas mínimas esperadas
-    need = ["Date","HomeTeam_norm","AwayTeam_norm","net_profit"]
-    for c in need:
-        if c not in df.columns:
-            return None
-    return df
+    
+    try:
+        df = pd.read_csv(path)
+    except Exception as e:
+        print(f"Error leyendo {path.name}: {e}")
+        return None
 
-def _load_matchlog_b365(season: int) -> pd.DataFrame | None:
-    # Antes: ML_B365_DIR / f"matchlog_{season}.csv"
-    # Ahora: outputs/matchlogs_market_{season}.csv
-    p = BASE / f"matchlogs_market_{season}.csv"
-    
-    if not p.exists():
+    # 1. Estandarizar columna PROFIT
+    if "net_profit" not in df.columns:
+        if "profit" in df.columns:
+            df["net_profit"] = df["profit"]
+        else:
+            # Si no hay profit, no nos sirve
+            return None
+
+    # 2. Estandarizar columna DATE (asegurar datetime)
+    if "Date" in df.columns:
+        df["Date"] = _safe_dt(df["Date"])
+    elif "date" in df.columns:
+        df["Date"] = _safe_dt(df["date"])
+    else:
         return None
-    df = pd.read_csv(p)
-    need = ["Date","HomeTeam_norm","AwayTeam_norm","net_profit"]
+
+    # 3. Validar columnas mínimas para el merge
+    need = ["Date", "HomeTeam_norm", "AwayTeam_norm", "net_profit"]
     for c in need:
         if c not in df.columns:
             return None
+            
     return df
 
 def build_curves_for_season(season: int) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
-    ml_m = _load_matchlog_model(season)
-    ml_b = _load_matchlog_b365(season)
+    # Rutas esperadas en la raíz outputs/
+    path_m = BASE / f"matchlogs_{season}.csv"
+    path_b = BASE / f"matchlogs_market_{season}.csv"
+
+    ml_m = _load_and_standardize(path_m)
+    ml_b = _load_and_standardize(path_b)
+
     if ml_m is None or ml_b is None or ml_m.empty or ml_b.empty:
         return None, None
 
-    key = ["Date","HomeTeam_norm","AwayTeam_norm"]
+    # Merge por claves del partido
+    key = ["Date", "HomeTeam_norm", "AwayTeam_norm"]
+    # Usamos inner join para quedarnos solo con partidos presentes en ambos
     both = pd.merge(
         ml_m, ml_b, on=key, how="inner",
-        suffixes=("_model","_b365")
+        suffixes=("_model", "_b365")
     )
+    
     if both.empty:
         return None, None
 
-    # Orden temporal
-    both["Date"] = _safe_dt(both["Date"])
+    # Ordenar cronológicamente
     both = both.sort_values("Date").reset_index(drop=True)
     dates_str = both["Date"].dt.strftime("%Y-%m-%d")
 
-    # Retornos por partido (ya calculados)
-    m_ret = _ensure_float(both.get("net_profit_model", both["net_profit"] if "net_profit" in both.columns else np.nan)).fillna(0.0)
-    b_ret = _ensure_float(both.get("net_profit_b365",  both["net_profit_b365"] if "net_profit_b365" in both.columns else both["net_profit"] if "net_profit" in both.columns else np.nan)).fillna(0.0)
+    # --- CALCULO DE RETORNOS ---
+    # Preferimos la columna del sufijo si existe, si no la genérica
+    def get_col(df, base_col, suffix):
+        if f"{base_col}{suffix}" in df.columns:
+            return df[f"{base_col}{suffix}"]
+        if base_col in df.columns:
+            return df[base_col]
+        return pd.Series(0.0, index=df.index)
 
-    # Si el merge trajo dos columnas 'net_profit' indistintas, preferimos las sufijadas
-    if "net_profit_model" not in both.columns and "net_profit" in both.columns:
-        # Caso raro: renombramos la del modelo si no existe sufijada
-        m_ret = _ensure_float(both["net_profit"]).fillna(0.0)
-    if "net_profit_b365" not in both.columns:
-        # Puede llamarse 'net_profit_y' según pandas si había conflicto
-        for cand in ["net_profit_y","net_profit_b"]:
-            if cand in both.columns:
-                b_ret = _ensure_float(both[cand]).fillna(0.0)
-                break
+    m_ret = _ensure_float(get_col(both, "net_profit", "_model")).fillna(0.0)
+    b_ret = _ensure_float(get_col(both, "net_profit", "_b365")).fillna(0.0)
 
     m_cum = m_ret.cumsum()
     b_cum = b_ret.cumsum()
 
-    # Labels (texto)
-    # true_result (num) puede venir en cualquiera de los dos; preferimos el del modelo
-    if "true_result_model" in both.columns:
-        true_num = _ensure_float(both["true_result_model"]).astype("Int64")
-    elif "true_result" in both.columns:
-        true_num = _ensure_float(both["true_result"]).astype("Int64")
-    else:
-        true_num = pd.Series([np.nan]*len(both), dtype="float64")
+    # --- CALCULO DE ETIQUETAS (LABELS) ---
+    # Intentamos recuperar el texto real (A/D/H)
+    
+    # 1. Resultado Real (True Result)
+    # Buscamos 'y_true', 'true_result', etc.
+    true_raw = pd.Series("", index=both.index, dtype="string")
+    for col in ["y_true_model", "y_true", "true_result_model", "true_result"]:
+        if col in both.columns:
+            true_raw = both[col].astype(str)
+            break
+    
+    # Mapear A/D/H -> Away/Draw/Home
+    true_txt = true_raw.map(TXT2LABEL).fillna(true_raw)
 
-    true_txt = true_num.map(CLASS2LABEL)
+    # 2. Predicción Modelo
+    model_raw = pd.Series("", index=both.index, dtype="string")
+    for col in ["y_pred_model", "y_pred", "Pred", "predicted_result"]:
+        if col in both.columns:
+            model_raw = both[col].astype(str)
+            break
+    model_txt = model_raw.map(TXT2LABEL).fillna(model_raw)
 
-    # model_txt
-    if "Pred" in both.columns:
-        model_txt = both["Pred"].map(TXT2LABEL).fillna("")  # nuestras salidas traían Pred="A/D/H"
-    elif "predicted_result" in both.columns:
-        model_txt = _ensure_float(both["predicted_result"]).astype("Int64").map(CLASS2LABEL)
-    else:
-        model_txt = pd.Series([""]*len(both), dtype="string")
+    # 3. Predicción Mercado (Bet365)
+    b365_raw = pd.Series("", index=both.index, dtype="string")
+    for col in ["y_pred_market", "bet365_pred", "y_pred_b365"]:
+        if col in both.columns:
+            b365_raw = both[col].astype(str)
+            break
+    b365_txt = b365_raw.map(TXT2LABEL).fillna(b365_raw)
 
-    # bet365_txt
-    if "bet365_pred" in both.columns:
-        b365_txt = _ensure_float(both["bet365_pred"]).astype("Int64").map(CLASS2LABEL)
-    else:
-        b365_txt = pd.Series([""]*len(both), dtype="string")
-
+    # Construir DataFrame final para el gráfico
     series_df = pd.DataFrame({
         "match_num": np.arange(1, len(both)+1, dtype=int),
         "date": dates_str,
@@ -156,18 +170,14 @@ def main():
 
     CURVES_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Detectar temporadas disponibles buscando matchlogs_YYYY.csv en la RAÍZ de outputs
-    # Filtramos para no coger 'matchlogs_market_' ni 'smote', solo los base.
+    # Detectar temporadas disponibles en la RAÍZ de outputs
     base_matchlogs = []
     for p in BASE.glob("matchlogs_*.csv"):
         if "market" in p.name or "smote" in p.name:
             continue
         base_matchlogs.append(p)
 
-    seasons = sorted({
-        _season_from_name(p)
-        for p in base_matchlogs
-    } - {None})
+    seasons = sorted({_season_from_name(p) for p in base_matchlogs} - {None})
 
     if not seasons:
         print("No se detectaron temporadas (matchlogs_YYYY.csv) en outputs/.")
@@ -179,7 +189,7 @@ def main():
     for s in seasons:
         series_df, summary = build_curves_for_season(s)
         if series_df is None or series_df.empty:
-            print(f"⚠️  Season {s}: No se pudo cruzar modelo vs bet365 (o faltan archivos).")
+            print(f"⚠️  Season {s}: No se pudo cruzar modelo vs bet365 (o faltan archivos/columnas).")
             continue
 
         # CSV
@@ -229,18 +239,16 @@ def main():
         })
         print(f"[CURVAS] Season {s}: {len(series_df)} puntos → guardado CSV/JSON.")
 
-    # Índice global (opcional, pero útil)
+    # Índice global
     if index_rows:
         idx_df = pd.DataFrame(index_rows).sort_values("test_season")
         idx_df.to_csv(BASE / "cumprofit_index.csv", index=False)
         (BASE / "cumprofit_index.json").write_text(
             json.dumps(index_rows, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print("Guardados índice de curvas:")
-        print("-", BASE / "cumprofit_index.csv")
-        print("-", BASE / "cumprofit_index.json")
+        print("Guardados índice de curvas.")
     else:
-        print("No se generaron curvas (¿faltan bet365_matchlogs o no coinciden partidos?).")
+        print("No se generaron curvas.")
 
 if __name__ == "__main__":
     main()
