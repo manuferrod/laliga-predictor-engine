@@ -1,5 +1,5 @@
 row_id,Date,HomeTeam_norm,AwayTeam_norm,B365H,B365D,B365A
-7777,2026-01-02,vallecano,getafe,2.08,3.02,4.75
+7777,2026-01-02,vallecano,getafe,2.08,3.03,4.75
 7771,2026-01-03,osasuna,ath bilbao,3.00,2.90,2.62
 7773,2026-01-03,elche,villarreal,3.25,3.50,2.20
 7774,2026-01-03,celta,valencia,2.00,3.30,4.00
@@ -9,5 +9,6 @@ row_id,Date,HomeTeam_norm,AwayTeam_norm,B365H,B365D,B365A
 7778,2026-01-04,real madrid,betis,1.45,4.75,6.00
 7779,2026-01-04,sociedad,ath madrid,3.90,3.60,1.90
 7780,2026-01-04,sevilla,levante,1.75,3.60,4.75
+
 
 
