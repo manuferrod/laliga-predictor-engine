@@ -8,17 +8,21 @@ on:
       - "scripts/run_stage2.py"
       - "scripts/verify_outputs.py"
       - "requirements.txt"
+      - ".github/workflows/finalize.yml"
+  workflow_dispatch:
 
 jobs:
   finalize:
     runs-on: ubuntu-latest
     env:
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
 
       - name: Install deps
         run: |
@@ -27,10 +31,10 @@ jobs:
 
       - name: Run Stage 2
         run: python scripts/run_stage2.py
-        
+
       - name: Build cumprofit curves (from matchlogs)
         run: python scripts/build_cumprofit_curves_from_matchlogs.py
-        
+
       - name: Verify outputs
         run: python scripts/verify_outputs.py
 
@@ -40,7 +44,6 @@ jobs:
           name: outputs
           path: outputs/
 
-      # === Copia automática al repo B ===
       - name: Push outputs to repo B
         env:
           REPO_B_PAT: ${{ secrets.REPO_B_PAT }}
@@ -50,28 +53,26 @@ jobs:
             echo "Skipping push to repo B: missing REPO_B_PAT or REPO_B_URL."
             exit 0
           fi
-      
+
           set -euo pipefail
-      
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      
+
           mkdir -p /tmp/repoB
           cd /tmp/repoB
-      
+
           AUTH_URL="https://x-access-token:${REPO_B_PAT}@${REPO_B_URL#https://}"
-      
           git clone "${AUTH_URL}" .
-          git remote set-url origin "${AUTH_URL}"
-      
+
           mkdir -p outputs
           find outputs -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           cp -r "$GITHUB_WORKSPACE/outputs/." outputs/
-      
+
           git add -A
           if git diff --cached --quiet; then
             echo "No hay cambios en outputs/ para repo B."
           else
             git commit -m "CI: update outputs from engine (${GITHUB_SHA::7})"
-            git push origin HEAD:main
+            git push "${AUTH_URL}" HEAD:main
           fi
