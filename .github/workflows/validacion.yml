@@ -1,0 +1,111 @@
+# Validación continua de la cadena de datos.
+#
+# Se ejecuta lo que puede ejecutarse sin la red y sin los artefactos: compilación
+# de todos los módulos, baterías de prueba offline e higiene del repositorio. Las
+# comprobaciones de calidad sobre los parquets quedan condicionadas a que estos
+# existan, porque `data/` no está bajo control de versiones (se regenera desde las
+# fuentes); así el mismo flujo sirve en un ejecutor que sí disponga de ellos.
+name: validación
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pruebas:
+    name: pruebas offline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Entorno mínimo a propósito: los módulos importan de forma perezosa las
+      # bibliotecas de scraping, de modo que toda la lógica pura —parseo,
+      # agregación, guardas y preprocesado— se valida sin instalarlas.
+      - name: Instalar dependencias de validación
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas==2.2.2 numpy==1.26.4 scipy==1.11.4 pyarrow==16.1.0 \
+                      scikit-learn==1.4.2 pytest==8.2.2
+
+      - name: Compilar todos los módulos
+        run: python -m compileall -q scripts
+
+      - name: Baterías de prueba
+        run: pytest
+
+      # Un parquet versionado convierte el repositorio en una segunda fuente de
+      # verdad que envejece en silencio; una copia .bak indica una publicación a
+      # medio terminar. Ni una ni otra deben viajar en el historial.
+      - name: Comprobar que no se versionan artefactos de datos
+        run: |
+          restos=$(git ls-files '*.parquet' '*.pkl' '*.joblib' '*.bak')
+          if [ -n "$restos" ]; then
+            echo "Artefactos de datos versionados:"; echo "$restos"; exit 1
+          fi
+          echo "Sin artefactos de datos en el índice."
+
+  artefactos:
+    name: calidad de los artefactos
+    runs-on: ubuntu-latest
+    needs: pruebas
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias de validación
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas==2.2.2 numpy==1.26.4 scipy==1.11.4 pyarrow==16.1.0 \
+                      scikit-learn==1.4.2
+
+      - name: ¿Están disponibles los artefactos?
+        id: artefactos
+        run: |
+          if [ -f data/02_processed/master_matches.parquet ]; then
+            echo "presentes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "presentes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sin artefactos en el ejecutor; las comprobaciones de calidad se omiten."
+          fi
+
+      - name: QA del maestro
+        if: steps.artefactos.outputs.presentes == 'true'
+        run: python scripts/consolidate/qa_master.py
+
+      - name: QA antifuga de las variables
+        if: steps.artefactos.outputs.presentes == 'true'
+        run: python scripts/features/qa_features.py
+
+      - name: Preprocesado en seco
+        if: steps.artefactos.outputs.presentes == 'true'
+        run: python scripts/features/build_preprocess.py --dry
+
+      # La evidencia del modelado se comprueba aparte del maestro porque puede
+      # existir sin él —un ejecutor puede traer `outputs/` de una pasada anterior—
+      # y porque lo que audita es distinto: no la calidad del dato de entrada sino
+      # la coherencia de lo que se va a publicar.
+      - name: ¿Hay evidencia de modelado?
+        id: modelos
+        run: |
+          if [ -f outputs/models/semanal/manifiesto.json ]; then
+            echo "presentes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "presentes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sin evidencia de modelado en el ejecutor; el QA de publicación se omite."
+          fi
+
+      - name: QA de publicación
+        if: steps.modelos.outputs.presentes == 'true'
+        run: python scripts/models/qa_models.py

@@ -3,9 +3,33 @@ data/
 !data/.gitkeep
 outputs/
 !outputs/.gitkeep
+downloaded_files/
 *.parquet
 *.pkl
 *.joblib
 *.out.ipynb
 .ipynb_checkpoints/
-!data/02_processed/transfermarkt_€€_2005_2025.parquet
+
+# Copias de seguridad que escribe `_common.write_df_safe` antes de publicar
+*.bak
+
+# Entorno y cachés de Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Directorios temporales de las autocomprobaciones de los extractores
+# (`transfermarkt._selfcheck` y equivalentes escriben aquí su salida de prueba)
+tm_tmp/
+
+# Salida de consola de una ejecución concreta, por el mismo motivo que `outputs/`:
+# es el registro de una pasada en una máquina, no parte de la especificación. Ningún
+# módulo ni documento del repositorio lo lee. Los guiones `_*.py` de la raíz sí se
+# versionan —son la evidencia de las cifras que el README cita—, pero su captura de
+# pantalla, no.
+logs/
+*.log
+
+# Configuración local del agente (permisos de herramientas de esta máquina)
+.claude/

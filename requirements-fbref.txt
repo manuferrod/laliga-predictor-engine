@@ -1,0 +1,26 @@
+# Dependencia de la comprobacion cruzada con FBref (`scripts/extractors/fbref.py`).
+#
+# Se instala aparte, y no en requirements.txt, por una razon de dependencias y no
+# de comodidad. `soccerdata` arrastra `seleniumbase`, que fija su propia version de
+# `requests` y de `beautifulsoup4` -las dos bibliotecas con las que se extraen
+# Understat, Transfermarkt y football-data-. Mantenerlo en el fichero principal
+# hacia que una comprobacion cruzada, que por diseno NO alimenta el maestro,
+# gobernase la pila HTTP de las fuentes que si lo alimentan: cada vez que
+# seleniumbase subia su minimo, el entorno del proyecto dejaba de resolver.
+#
+# Separandolo, el entorno de la cadena principal queda fijado por las versiones que
+# el proyecto ha elegido, y quien quiera reproducir la comprobacion de FBref
+# instala esto encima -o, mejor, en un entorno virtual propio, porque la
+# instalacion movera `requests` y `beautifulsoup4` a lo que exija seleniumbase-.
+#
+#     pip install -r requirements-fbref.txt
+#
+# PREREQUISITO DE SISTEMA (no pip): Google Chrome instalado. SeleniumBase lo usa
+# para pasar Cloudflare en FBref. Si no esta en la ruta estandar, pasale
+# --browser "C:\ruta\chrome.exe".
+#
+# Que aporta: tras la retirada del dato avanzado a nivel equipo-partido en enero de
+# 2026, lo que FBref sigue publicando es un marcador basico redundante con
+# Sofascore. `fbref.py` se conserva para que ese contraste sea reproducible, no
+# porque anada variables al conjunto.
+soccerdata>=1.9.0
