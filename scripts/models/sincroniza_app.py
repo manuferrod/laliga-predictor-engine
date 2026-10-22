@@ -243,7 +243,10 @@ def sincroniza(origen: Path = WEB, destino: Path = DESTINO, *,
         "generado": manifiesto.get("generado"),
         "regimen": manifiesto.get("regimen"),
         "modelo": manifiesto.get("modelo"),
-        "origen": str(origen),
+        # El repositorio y el subdirectorio de procedencia, no la ruta absoluta:
+        # el recibo viaja versionado en un repositorio público y la ruta de la
+        # máquina no añade nada que la identidad de la publicación no diga ya.
+        "origen": "/".join(origen.parts[-3:]),
         "n_artefactos": len(copiados),
         "artefactos": copiados,
         "retirados": [p.name for p in de_mas],
